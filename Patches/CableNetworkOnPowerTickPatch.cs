@@ -20,18 +20,15 @@ namespace DeadlyElectricity.Patches
         [HarmonyPrefix]
         private static bool Prefix(CableNetwork __instance)
         {
-            if (__instance.CurrentLoad > 0)
-            {
-                var energyToBurn = (__instance.CurrentLoad * ConfigurationHelper.GetFloat("powerShareConvertedPerCable")) * __instance.CableList.Count;
-                double energyPerCable = energyToBurn / __instance.CableList.Count;
-                foreach (Cable cable in __instance.CableList)
-                {
-                    DeadlyElectricity.LogModMessage(LogLevel.Debug, $"Emitting heat at {energyPerCable} per cable for a total of {energyToBurn}");
-                    AtmosphericsManagerThingAtmosphereTickPatch.cableHeats.Add(new(cable.WorldGrid, energyPerCable));
-                }
+            float energyToBurn = __instance.CurrentLoad * 0.01f * ConfigurationHelper.GetFloat("PowerShareConvertedPerCable");
+            DeadlyElectricity.LogModMessage(LogLevel.Debug, $"Emitting heat at {energyToBurn} per cable");
 
-                __instance.PotentialLoad -= energyToBurn;
+            foreach (Cable cable in __instance.CableList)
+            {
+                AtmosphericsManagerThingAtmosphereTickPatch.cableHeats.Add(new(cable.WorldGrid, energyToBurn));
             }
+
+            __instance.PotentialLoad -= energyToBurn;
 
             return true;
         }

@@ -17,7 +17,7 @@ namespace DeadlyElectricity.Patches
             Cable cable = useOnThing as Cable;
             if (cable != null && cable.CableNetwork.PotentialLoad > ConfigurationHelper.GetInt("MaximumSafeWatts"))
             {
-                float loadDamage = cable.CableNetwork.PotentialLoad / 1000;
+                float loadDamage = cable.CableNetwork.PotentialLoad * ConfigurationHelper.GetFloat("PercentageOfPowerConvertedToDamage") * ConfigurationHelper.GetFloat("DamageMultiplerForShortCircuit");
 
                 if (cable.CableNetwork.PotentialLoad > ConfigurationHelper.GetInt("WattsThresholdForCableDestroyed"))
                 {

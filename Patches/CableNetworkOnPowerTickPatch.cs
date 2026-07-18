@@ -41,7 +41,7 @@ namespace DeadlyElectricity.Patches
             DeadlyElectricity.LogModMessage(LogLevel.Debug, $"Damage roll: {damageRoll} passed? {damageRoll > __instance.RequiredLoad + ConfigurationHelper.GetInt("WattsThresholdForGeneratorDamage")}");
             if (damageRoll > __instance.RequiredLoad + ConfigurationHelper.GetInt("WattsThresholdForGeneratorDamage"))
             {
-                PowerProvider powerProvider = __instance.PowerTick.Providers.Where(provider => !_excludedGenerators.Contains(provider.Device.PrefabName)).ToList().Pick();
+                PowerProvider powerProvider = __instance.PowerTick.Providers.Where(static provider => !_excludedGenerators.Contains(provider.Device.PrefabName)).ToList().Pick();
 
                 if (powerProvider == null) return;
 

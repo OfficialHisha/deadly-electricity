@@ -6,12 +6,14 @@ using HarmonyLib;
 
 namespace DeadlyElectricity.Patches
 {
-    [HarmonyPatch(typeof(WireCutter), nameof(WireCutter.OnUseItem))]
+    [HarmonyPatch(typeof(Item), nameof(Item.OnUseItem))]
     internal class ItemOnUseItemPatch
     {
         [HarmonyPostfix]
-        private static void PostFix(WireCutter __instance, ref bool __result, Thing useOnThing)
+        private static void PostFix(Item __instance, ref bool __result, Thing useOnThing)
         {
+            if (__instance is not WireCutter) return;
+            
             Cable cable = useOnThing as Cable;
             if (cable != null && cable.CableNetwork.PotentialLoad > ConfigurationHelper.GetInt("MaximumSafeWatts"))
             {

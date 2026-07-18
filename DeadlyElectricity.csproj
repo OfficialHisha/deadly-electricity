@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>DeadlyElectricity</AssemblyName>
     <Description>What if electricity wasn't that simple?</Description>
     <Version>1.0.3</Version>
@@ -9,20 +9,26 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <StationeersDir>E:\SteamLibrary\steamapps\common\Stationeers\</StationeersDir>
+    <StationeersManagedDirectory>$(StationeersDir)rocketstation_Data\Managed\</StationeersManagedDirectory>
+    <BepinexCoreDirectory>$(StationeersDir)Bepinex\core\</BepinexCoreDirectory>
+    <SLPDirectory>$(StationeersDir)Bepinex\plugins\StationeersLaunchPad\</SLPDirectory>
+    <NoStandardLibraries>true</NoStandardLibraries>
+    <NoStdLib>true</NoStdLib>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+  </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
-    <PackageReference Include="BepInEx.Core" Version="5.*" />
-    <PackageReference Include="BepInEx.PluginInfoProps" Version="1.*" />
-    <PackageReference Include="UnityEngine.Modules" Version="2021.2.13" IncludeAssets="compile" />
-    <Reference Include="Stationeers">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stationeers\rocketstation_Data\Managed\Assembly-CSharp.dll</HintPath>
-    </Reference>
+    <GameDll Include="$(StationeersManagedDirectory)\*.dll" />
+    <GameDll Include="$(BepinexCoreDirectory)\*.dll" Exclude="$(BepinexCoreDirectory)\0Harmony20.dll" />
+    <GameDll Include="$(SLPDirectory)\LaunchPadBooster.dll" />
+    <GameDlls Include="@(GameDll)">
+      <HintPath>%(Identity)</HintPath>
+    </GameDlls>
+    <Reference Include="@(GameDlls->'%(Filename)')" Private="False" />
   </ItemGroup>
-  
-  <ItemGroup Condition="'$(TargetFramework.TrimEnd(`0123456789`))' == 'net'">
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.2" PrivateAssets="all" />
-  </ItemGroup>
-  
+
   <ItemGroup>
     <Folder Include="Transpilers\" />
   </ItemGroup>

@@ -5,7 +5,7 @@ using HarmonyLib;
 
 namespace DeadlyElectricity
 {
-    [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
+    [BepInPlugin("DeadlyElectricity", "Deadly Electricity", "1.0.3")]
     public class DeadlyElectricity : BaseUnityPlugin
     {
         internal static ManualLogSource Log;
@@ -18,12 +18,12 @@ namespace DeadlyElectricity
 
             // Plugin startup logic
             LogModMessage(LogLevel.Info, "Loading harmony");
-            Harmony harmony = new(PluginInfo.PLUGIN_GUID);
+            Harmony harmony = new(Info.Metadata.GUID);
 
             LogModMessage(LogLevel.Info, "Applying Patches");
             harmony.PatchAll();
 
-            LogModMessage(LogLevel.Info, $"Plugin {PluginInfo.PLUGIN_GUID} {PluginInfo.PLUGIN_VERSION} is loaded!");
+            LogModMessage(LogLevel.Info, $"Plugin {Info.Metadata.GUID} {Info.Metadata.Version} is loaded!");
         }
 
         internal static void LogModMessage(LogLevel loglevel, string message)

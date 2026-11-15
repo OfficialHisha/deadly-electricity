@@ -1,6 +1,7 @@
 ﻿using BepInEx;
 using BepInEx.Logging;
 using DeadlyElectricity.Configuration;
+using DeadlyElectricity.Switching;
 using HarmonyLib;
 
 namespace DeadlyElectricity
@@ -23,7 +24,16 @@ namespace DeadlyElectricity
             LogModMessage(LogLevel.Info, "Applying Patches");
             harmony.PatchAll();
 
+            // Optional multiplayer sync of the generator switch state (does nothing unless enabled in the config).
+            GeneratorSwitchSync.Initialize(Info.Metadata.Version.ToString());
+
             LogModMessage(LogLevel.Info, $"Plugin {Info.Metadata.GUID} {Info.Metadata.Version} is loaded!");
+        }
+
+        private void Update()
+        {
+            // Sends the generator switch changes queued during the last frame, if any (one integer read otherwise).
+            GeneratorSwitchSync.Flush();
         }
 
         internal static void LogModMessage(LogLevel loglevel, string message)

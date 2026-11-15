@@ -15,7 +15,15 @@ namespace DeadlyElectricity.Patches
     [HarmonyPatch(typeof(CableNetwork), nameof(CableNetwork.OnPowerTick))]
     internal class CableNetworkOnPowerTickPatch
     {
-        private static readonly string[] _excludedGenerators = ConfigurationHelper.GetString("ExcludedPowerSuppliers").Split(',');
+        // Power suppliers that must NEVER take over-supply damage, whatever the configuration says. The power
+        // connector is a passive socket, not a machine, so it is always protected. (It is also in the default
+        // ExcludedPowerSuppliers list, but configuration files created by older versions do not contain it.)
+        private static readonly string[] _alwaysExcludedGenerators = { "StructurePowerConnector" };
+
+        private static readonly string[] _excludedGenerators = ConfigurationHelper.GetString("ExcludedPowerSuppliers")
+            .Split(',')
+            .Concat(_alwaysExcludedGenerators)
+            .ToArray();
 
         [HarmonyPrefix]
         private static bool Prefix(CableNetwork __instance)

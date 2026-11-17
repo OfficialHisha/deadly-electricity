@@ -1,172 +1,149 @@
 using System;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using System.Threading;
 using Assets.Scripts;
 using Assets.Scripts.Networking;
 using Assets.Scripts.Objects;
-using BepInEx.Logging;
+using UnityEngine;
 
 namespace DeadlyElectricity.Switching
 {
     /// <summary>
-    /// Multiplayer synchronisation of the generator switch state (host to clients).
+    /// Multiplayer synchronisation of the generator switch state (host to clients), using only what the base game
+    /// already sends.
     ///
     /// <para>
-    /// <b>Who needs it.</b> The host decides everything (power, damage, IC10, saving). Clients only need to know
+    /// <b>What it is for.</b> The host decides everything (power, damage, IC10, saving). Clients only need to know
     /// which generators are switched off so that they <i>look</i> right: wind turbine blades and sound stop, the
-    /// tooltip line shows, and reading <c>On</c> returns the real value. Without this, a client would see a
-    /// switched-off wind turbine spinning.
+    /// tooltip line shows, and reading <c>On</c> returns the real value. Without it a client simply keeps seeing a
+    /// switched-off wind turbine spinning; nothing else is affected.
     /// </para>
     ///
     /// <para>
-    /// <b>Why separate messages and not the game's own update stream.</b> The game's per-thing network updates are
-    /// a positional binary protocol: appending bytes for a client that does not run the mod would corrupt the
-    /// stream and disconnect it. Mod messages travel in their own length-delimited packets (through
-    /// LaunchPadBooster), so a message that is not understood is simply skipped.
+    /// <b>How it works.</b> For every object that changed, the game sends a 16-bit "what changed" mask followed by the
+    /// data for each bit that is set. Each class only reads the bits it knows and ignores the others. This feature
+    /// uses two bits that none of the generator classes use, <see cref="OffBit"/> and <see cref="OnBit"/>, and
+    /// <b>no data at all</b> behind them: exactly one of them being set means "this generator is now off" or "now on".
     /// </para>
     ///
     /// <para>
-    /// <b>This is opt-in</b> (<c>GeneratorSwitch.EnableNetworkSync</c>, default off). Using the LaunchPadBooster
-    /// networking changes the join handshake of the whole game session, which means every player must run this mod
-    /// with the setting enabled to be able to join. It must therefore be a deliberate choice of the server owner.
+    /// <b>Why this is safe for everybody.</b>
+    /// <list type="bullet">
+    /// <item>A player without the mod ignores the two bits, and since no bytes follow them the rest of the update is
+    /// read exactly as before. They can join any server and the server can have the mod without requiring anything
+    /// from them; they only miss the visual feedback.</item>
+    /// <item>A player with the mod on a server without the mod simply never receives the bits.</item>
+    /// <item>There is no setting, no handshake and no extra library: the host always writes the bits and a client with
+    /// the mod always reads them.</item>
+    /// </list>
     /// </para>
     ///
     /// <para>
-    /// <b>Cost.</b> Nothing is sent while nobody toggles a generator. A toggle is queued and, once per frame at most,
-    /// all queued changes are sent as one small message (about 9 bytes per generator). A joining player gets the list
-    /// of switched-off generators once, as part of the join data. If the option is off, every entry point returns
-    /// after reading a single boolean.
+    /// <b>When the bits are sent.</b>
+    /// <list type="bullet">
+    /// <item>When a generator is switched, the host marks it as changed, so it is in the next update.</item>
+    /// <item>When a player joins, the game marks every object as fully changed, which sets all 16 bits. Just before
+    /// writing, <see cref="WithState"/> replaces the two bits of a generator by the single bit of its real state, so
+    /// the joining client learns it. A client ignores an update where both or none of the bits are set.</item>
+    /// <item>Every <see cref="RefreshSeconds"/> seconds, while at least one generator is switched off, the host marks
+    /// the switched-off generators again, so a client that missed an update catches up. This only visits the
+    /// generators that are off, which are the only ones the mod tracks.</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Cost.</b> No bytes beyond the object id and mask the game sends for any changed object, and only for a
+    /// generator that was switched. On the host every update does one mask test; on a client every received update
+    /// does one mask test. Nothing runs while nobody uses the feature.
     /// </para>
     /// </summary>
     internal static class GeneratorSwitchSync
     {
-        /// <summary>One queued switch change.</summary>
-        internal readonly struct Change
-        {
-            internal readonly long ReferenceId;
-            internal readonly bool Disabled;
+        /// <summary>Set (alone) when the generator is switched off. Unused by every generator class of the game.</summary>
+        internal const ushort OffBit = 0x4000;
 
-            internal Change(long referenceId, bool disabled)
-            {
-                ReferenceId = referenceId;
-                Disabled = disabled;
-            }
-        }
+        /// <summary>Set (alone) when the generator is switched on. Unused by every generator class of the game.</summary>
+        internal const ushort OnBit = 0x8000;
 
-        // True only after the LaunchPadBooster link has been set up successfully.
-        private static volatile bool _active;
+        /// <summary>Both bits together.</summary>
+        internal const ushort Mask = OffBit | OnBit;
 
-        // Changes waiting to be sent. Written from whichever thread runs the IC10 program, read on the main thread.
-        private static readonly List<Change> Pending = new();
-        private static readonly object PendingLock = new();
-        private static int _pendingCount;
+        /// <summary>How often the switched-off generators are announced again to the clients.</summary>
+        internal const float RefreshSeconds = 30f;
 
-        // Reused for the outgoing batch so that sending does not allocate per frame.
-        private static readonly List<Change> Batch = new();
+        // Next time (Time.realtimeSinceStartup) the periodic refresh is due.
+        private static float _nextRefresh;
 
-        // Set by StartLink. Calling the link through a delegate keeps every method of this class free of references
-        // to LaunchPadBooster types, so none of them can fail to load when that library is not installed.
-        private static Action<List<Change>> _sender;
-
-        /// <summary>True when the multiplayer sync is running on this machine.</summary>
-        internal static bool Active => _active;
+        // Cached so that the refresh does not allocate a delegate every time.
+        private static readonly Action<Thing> MarkOff = static thing => thing.NetworkUpdateFlags |= OffBit;
 
         /// <summary>
-        /// Sets the sync up if the configuration asks for it. Called once from the plugin's <c>Awake</c>.
-        /// Never throws: if LaunchPadBooster is missing or anything fails, the feature keeps working without sync.
+        /// Returns <paramref name="updateType"/> with the two sync bits replaced by the single bit that describes the
+        /// current state. Every other bit is left untouched.
         /// </summary>
-        internal static void Initialize(string modVersion)
+        internal static ushort WithState(ushort updateType, bool disabled)
         {
-            if (!Configuration.ConfigurationHelper.GetBool("EnableNetworkSync")) return;
-            if (!GeneratorSwitch.Enabled) return;
-
-            try
-            {
-                StartLink(modVersion);
-            }
-            catch (Exception exception)
-            {
-                // Typically LaunchPadBooster.dll is not present, which surfaces as a load/type exception here.
-                _active = false;
-                _sender = null;
-                DeadlyElectricity.LogModMessage(LogLevel.Warning,
-                    $"Generator switch network sync is enabled but could not start ({exception.GetType().Name}: {exception.Message}). The switch still works, but clients will not see its state.");
-            }
+            return (ushort)((updateType & ~Mask) | (disabled ? OffBit : OnBit));
         }
 
         /// <summary>
-        /// The only method of this class that references <see cref="LaunchPadLink"/>. It must not be inlined, so that
-        /// a missing LaunchPadBooster fails here, inside the caller's try/catch, and nowhere else.
+        /// Reads the state carried by <paramref name="updateType"/>. Returns false when it carries none, which is the
+        /// case when neither bit is set (the generator did not change) or both are (an update that was not normalised).
         /// </summary>
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private static void StartLink(string modVersion)
+        internal static bool TryReadState(ushort updateType, out bool disabled)
         {
-            if (!LaunchPadLink.TryInitialize(modVersion)) return;
+            bool off = (updateType & OffBit) != 0;
+            bool on = (updateType & OnBit) != 0;
+            disabled = off;
+            return off != on;
+        }
 
-            _sender = LaunchPadLink.Send;
-            _active = true;
+        /// <summary>True when this machine is a host that currently has players connected.</summary>
+        private static bool HostWithClients()
+        {
+            return NetworkManager.IsServer && NetworkServer.HasClients();
         }
 
         /// <summary>
-        /// Queues a change made on this machine so that it is announced to the clients.
-        /// Only the host announces; anywhere else (or with the sync off) this returns immediately.
+        /// Called on the host right after a generator was switched: marks it as changed so the next update carries its
+        /// state. Does nothing in single player or when nobody is connected (a player who joins later learns the state
+        /// from the update the game sends for everything at that moment).
         /// </summary>
         internal static void NotifyChanged(Thing thing, bool disabled)
         {
-            if (!_active || !NetworkManager.IsServer) return;
+            if (!HostWithClients()) return;
 
-            lock (PendingLock)
-            {
-                Pending.Add(new Change(thing.ReferenceId, disabled));
-                Volatile.Write(ref _pendingCount, Pending.Count);
-            }
+            thing.NetworkUpdateFlags |= disabled ? OffBit : OnBit;
         }
 
         /// <summary>
-        /// Sends everything queued since the last call as a single message. Called once per frame from the plugin's
-        /// <c>Update</c>; when nothing is queued this is one integer read.
+        /// Called on the host every time the game builds a batch of updates. Once every
+        /// <see cref="RefreshSeconds"/> seconds it announces the switched-off generators again; the rest of the time it
+        /// is a single integer test.
         /// </summary>
-        internal static void Flush()
+        internal static void RefreshIfDue()
         {
-            if (Volatile.Read(ref _pendingCount) == 0) return;
+            if (!GeneratorSwitch.AnyDisabled) return;
 
-            Batch.Clear();
-            lock (PendingLock)
-            {
-                Batch.AddRange(Pending);
-                Pending.Clear();
-                Volatile.Write(ref _pendingCount, 0);
-            }
+            float now = Time.realtimeSinceStartup;
+            if (now < _nextRefresh) return;
 
-            // Nobody to tell (single player, or a host that is alone): drop the batch. Players that join later get
-            // the full list from the join data instead.
-            if (!NetworkServer.HasClients()) return;
+            _nextRefresh = now + RefreshSeconds;
+            if (!HostWithClients()) return;
 
-            try
-            {
-                _sender?.Invoke(Batch);
-            }
-            catch (Exception exception)
-            {
-                DeadlyElectricity.LogModMessage(LogLevel.Warning,
-                    $"Could not send generator switch changes to the clients: {exception.Message}");
-            }
+            GeneratorSwitch.ForEachDisabled(MarkOff);
         }
 
         /// <summary>
-        /// Applies a batch received from the host. Unknown or already destroyed generators are skipped.
+        /// Called on a client for every update it receives that has one of the sync bits. Applies the state if the
+        /// object is a switchable generator and the update carries exactly one state bit.
         /// </summary>
-        internal static void ApplyFromHost(List<Change> changes)
+        internal static void ApplyReceivedState(Thing thing, ushort updateType)
         {
-            foreach (Change change in changes)
-            {
-                Thing thing = Referencable.Find<Thing>(change.ReferenceId);
-                if (thing != null && GeneratorSwitch.IsSwitchable(thing))
-                {
-                    GeneratorSwitch.SetDisabled(thing, change.Disabled, notifyNetwork: false);
-                }
-            }
+            // Only a client applies received state. The host is the source of truth and never obeys an update.
+            if (NetworkManager.IsServer) return;
+            if (!GeneratorSwitch.IsSwitchable(thing)) return;
+            if (!TryReadState(updateType, out bool disabled)) return;
+
+            GeneratorSwitch.SetDisabled(thing, disabled, notifyNetwork: false);
         }
     }
 }

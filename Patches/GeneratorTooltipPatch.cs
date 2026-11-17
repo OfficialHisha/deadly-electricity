@@ -20,8 +20,8 @@ namespace DeadlyElectricity.Patches
     ///
     /// <para>
     /// <b>Cost.</b> The tooltip is only built while the player looks at the generator, so there is no per-frame or
-    /// per-generator cost. In multiplayer clients only know the state when the optional network sync
-    /// (<c>EnableNetworkSync</c>, see <c>GeneratorSwitchSync</c>) is enabled; otherwise the line is shown on the host only.
+    /// per-generator cost. In multiplayer, a client that has the mod learns the state from the host (see
+    /// <c>GeneratorSwitchSync</c>) and shows the line too; a client without the mod does not.
     /// </para>
     /// </summary>
     [HarmonyPatch]

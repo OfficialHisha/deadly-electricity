@@ -171,10 +171,10 @@ namespace DeadlyElectricity.Switching
         }
 
         /// <summary>
-        /// Adds the reference id of every generator that is currently switched off to <paramref name="ids"/>.
-        /// Only used when a player joins, never on a hot path.
+        /// Calls <paramref name="action"/> for every generator that is currently switched off.
+        /// Only used by the occasional multiplayer refresh (see <see cref="GeneratorSwitchSync"/>), never on a hot path.
         /// </summary>
-        internal static void CollectDisabledIds(List<long> ids)
+        internal static void ForEachDisabled(Action<Thing> action)
         {
             if (!AnyDisabled) return;
 
@@ -183,9 +183,9 @@ namespace DeadlyElectricity.Switching
                 foreach (KeyValuePair<Thing, object> entry in Disabled)
                 {
                     Thing thing = entry.Key;
-                    if (thing != null && thing.ReferenceId != 0L)
+                    if (thing != null)
                     {
-                        ids.Add(thing.ReferenceId);
+                        action(thing);
                     }
                 }
             }

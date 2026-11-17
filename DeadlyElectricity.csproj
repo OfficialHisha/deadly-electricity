@@ -22,9 +22,7 @@
   <ItemGroup>
     <GameDll Include="$(StationeersManagedDirectory)\*.dll" />
     <GameDll Include="$(BepinexCoreDirectory)\*.dll" Exclude="$(BepinexCoreDirectory)\0Harmony20.dll" />
-    <GameDll Include="$(SLPDirectory)\LaunchPadBooster.dll" Condition="Exists('$(SLPDirectory)\LaunchPadBooster.dll')" />
-    <!-- Some installs keep LaunchPadBooster directly in the plugins folder instead of the StationeersLaunchPad one. -->
-    <GameDll Include="$(StationeersDir)Bepinex\plugins\LaunchPadBooster.dll" Condition="!Exists('$(SLPDirectory)\LaunchPadBooster.dll') And Exists('$(StationeersDir)Bepinex\plugins\LaunchPadBooster.dll')" />
+    <GameDll Include="$(SLPDirectory)\LaunchPadBooster.dll" />
     <GameDlls Include="@(GameDll)">
       <HintPath>%(Identity)</HintPath>
     </GameDlls>
